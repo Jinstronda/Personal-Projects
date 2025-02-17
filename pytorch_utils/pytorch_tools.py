@@ -1,3 +1,4 @@
+%%writefile pytorch_tools.py
 import subprocess
 import sys
 import importlib
@@ -52,8 +53,6 @@ def setup_torch_env(
     print("✅ PyTorch environment setup complete!")
 setup_torch_env()
 
-
-
 def create_dataloaders(
   train_dir: str,
   test_dir: str,
@@ -96,11 +95,8 @@ def create_dataloaders(
       shuffle=False,
       batch_size = batch_size,
       pin_memory = True
-
-
   )
   return (train_dataloader,test_dataloader,class_names)
-
 
 def train_step_classification(
     model,
@@ -108,9 +104,7 @@ def train_step_classification(
     optimizer,
     train_dataloader,
     num_classes
-
   ):
-
   """Does one Epoch of Training for Classification Tasks
 
   Args:
@@ -129,42 +123,30 @@ def train_step_classification(
   from torchmetrics import F1Score, ConfusionMatrix, Accuracy
   device = "cuda" if torch.cuda.is_available() else "cpu"
   if num_classes == 2:
-    f1_f = F1Score(task="binary",num_classes = num_classes).to(device)
-    accuracy_f = Accuracy(task="binary",num_classes = num_classes).to(device)
+    f1_metric = F1Score(task="binary",num_classes=num_classes).to(device)
+    accuracy_metric = Accuracy(task="binary",num_classes=num_classes).to(device)
   else:
-    f1_f = F1Score(task="multiclass", num_classes = num_classes).to(device)
-    accuracy_f = Accuracy(task="multiclass",num_classes=num_classes).to(device)
-
-  train_accuracy, train_f1, train_loss = 0.0,0.0,0.0
-
-
-
+    f1_metric = F1Score(task="multiclass", num_classes=num_classes).to(device)
+    accuracy_metric = Accuracy(task="multiclass",num_classes=num_classes).to(device)
+  total_loss = 0.0
   model.to(device)
   model.train()
   for X,y in train_dataloader:
     X,y = X.to(device), y.to(device)
-    # Gets the Prediction
     y_pred = model(X)
-    # Calculate Loss
     loss = loss_fn(y_pred,y)
-    # Updates Metrics
-    train_accuracy += accuracy_f(y_pred,y).item()
-    train_f1 += f1_f(y_pred,y).item()
-    train_loss += loss.item()
-    
-    # BackPropagation
+    total_loss += loss.item()
+    accuracy_metric.update(y_pred,y)
+    f1_metric.update(y_pred,y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    accuracy_f.reset()
-    f1_f.reset()
-
- # Calculates Average for everything based on the Number of Epochs of the data oader
-  train_accuracy, train_f1, train_loss = train_accuracy / len(train_dataloader), train_f1 / len(train_dataloader), train_loss / len(train_dataloader)
-
-  return (train_accuracy,train_f1,train_loss)
-
-
+  avg_loss = total_loss / len(train_dataloader)
+  overall_accuracy = accuracy_metric.compute().item()
+  overall_f1 = f1_metric.compute().item()
+  accuracy_metric.reset()
+  f1_metric.reset()
+  return (avg_loss,overall_f1,overall_accuracy)
 
 def test_step_classification(
     model,
@@ -190,13 +172,12 @@ def test_step_classification(
   from torchmetrics import F1Score, ConfusionMatrix, Accuracy
   device = "cuda" if torch.cuda.is_available() else "cpu"
   if num_classes == 2:
-    f1_f = F1Score(task="binary",num_classes = num_classes).to(device)
-    accuracy_f = Accuracy(task="binary",num_classes = num_classes).to(device)
+    f1_metric = F1Score(task="binary",num_classes=num_classes).to(device)
+    accuracy_metric = Accuracy(task="binary",num_classes=num_classes).to(device)
   else:
-    f1_f = F1Score(task="multiclass", num_classes = num_classes).to(device)
-    accuracy_f = Accuracy(task="multiclass",num_classes=num_classes).to(device)
-
-  test_accuracy, test_f1, test_loss = 0.0,0.0,0.0
+    f1_metric = F1Score(task="multiclass", num_classes=num_classes).to(device)
+    accuracy_metric = Accuracy(task="multiclass",num_classes=num_classes).to(device)
+  total_loss = 0.0
   model.to(device)
   model.eval() # Puts the model into eval mode to notify the layers
   with torch.inference_mode(): # Apparently this is more effective than no grad
@@ -204,20 +185,15 @@ def test_step_classification(
       X,y = X.to(device), y.to(device)
       y_pred = model(X)
       loss = loss_fn(y_pred,y)
-      test_accuracy += accuracy_f(y_pred,y).item()
-      test_f1 += f1_f(y_pred,y).item()
-      test_loss += loss.item()
-      accuracy_f.reset()
-      f1_f.reset()
-
-  test_loss, test_f1 = test_loss / len(test_dataloader), test_f1 / len(test_dataloader)
-  test_accuracy = test_accuracy / len(test_dataloader)
-
-  return test_accuracy,test_f1,test_loss
-
-
-
-
+      total_loss += loss.item()
+      accuracy_metric.update(y_pred,y)
+      f1_metric.update(y_pred,y)
+  avg_loss = total_loss / len(test_dataloader)
+  overall_accuracy = accuracy_metric.compute().item()
+  overall_f1 = f1_metric.compute().item()
+  accuracy_metric.reset()
+  f1_metric.reset()
+  return (avg_loss,overall_f1,overall_accuracy)
 
 def train_classification(model,
                          train_dataloader,
@@ -252,7 +228,6 @@ def train_classification(model,
                 - test_f1: List of testing F1 scores per epoch.
                 - "est_acc: List of testing accuracies per epoch.
     """
-
     from tqdm.auto import tqdm
     results = {
         "train_loss": [],
@@ -262,7 +237,6 @@ def train_classification(model,
         "test_f1": [],
         "test_acc": []
     }
-
     for epoch in tqdm(range(epochs)):
         train_loss, train_f1, train_acc = train_step_classification(
             model=model,
@@ -277,7 +251,6 @@ def train_classification(model,
             num_classes=num_classes,
             test_dataloader=test_dataloader
         )
-
         if epochs < 20:
           print(f"Epoch: {epoch} | "
                 f"Train Loss: {train_loss:.4f} | Train F1: {train_f1:.4f} | Train Acc: {train_acc:.4f} | "
@@ -292,18 +265,13 @@ def train_classification(model,
             print(f"Epoch: {epoch} | "
                   f"Train Loss: {train_loss:.4f} | Train F1: {train_f1:.4f} | Train Acc: {train_acc:.4f} | "
                   f"Test Loss: {test_loss:.4f} | Test F1: {test_f1:.4f} | Test Acc: {test_acc:.4f}")
-
-
-
         results["train_loss"].append(train_loss)
         results["train_f1"].append(train_f1)
         results["train_acc"].append(train_acc)
         results["test_loss"].append(test_loss)
         results["test_f1"].append(test_f1)
         results["test_acc"].append(test_acc)
-
     return results
-
 
 def plot_loss_curves(results):
   """ Plots Loss and Accuracy Curve for a Model With a Results Dictionary based on my Training Function
@@ -320,7 +288,6 @@ def plot_loss_curves(results):
   test_loss = results["test_loss"]
   train_acc = results["train_acc"]
   test_acc = results["test_acc"]
-
   train_epochs = range(len(train_loss))
   test_epochs = range(len(test_loss))
   plt.figure(figsize=(15,7))
@@ -337,4 +304,3 @@ def plot_loss_curves(results):
   plt.xlabel("Epochs")
   plt.ylabel("Accuracy")
   plt.legend()
-
