@@ -1,4 +1,3 @@
-%%writefile pytorch_tools.py
 import subprocess
 import sys
 import importlib
