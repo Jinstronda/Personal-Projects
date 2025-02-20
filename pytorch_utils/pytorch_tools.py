@@ -303,3 +303,60 @@ def plot_loss_curves(results):
   plt.xlabel("Epochs")
   plt.ylabel("Accuracy")
   plt.legend()
+
+
+
+def download_data(source: str, destination: str, remove_source: bool = True):
+    """
+    Downloads a zip file from a source URL, extracts it into a destination folder,
+    and optionally removes the zip file after extraction.
+    """
+
+    data_path = Path("Data/")
+    image_path = data_path / destination
+
+    if image_path.exists() and any(image_path.iterdir()):  # Check if folder exists and is not empty
+        print(f"✅ {image_path} directory already exists and is not empty. Skipping download...")
+        return image_path
+
+    print(f"❌ {image_path} directory not found. Creating it now...")
+    image_path.mkdir(parents=True, exist_ok=True)
+
+    # Download the file
+    target_file = Path(source).name
+    zip_path = data_path / target_file
+
+    try:
+        print(f"⬇️ Downloading {target_file} from {source}...")
+        response = requests.get(source, stream=True)
+        response.raise_for_status()  # Raise an error for bad responses (4xx, 5xx)
+        
+        with open(zip_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):  # Stream download
+                f.write(chunk)
+
+        print("✅ Download complete.")
+
+        # Extract the zip file
+        print("📦 Extracting contents...")
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(image_path)
+
+        print(f"✅ Extraction complete. Files saved to {image_path}")
+
+        # Remove source zip file if specified
+        if remove_source:
+            os.remove(zip_path)
+            print(f"🗑️ Removed source zip file: {zip_path}")
+
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Failed to download {source}: {e}")
+        return None
+    except zipfile.BadZipFile:
+        print("❌ Error: Downloaded file is not a valid zip archive.")
+        return None
+    except Exception as e:
+        print(f"❌ An unexpected error occurred: {e}")
+        return None
+
+    return image_path
